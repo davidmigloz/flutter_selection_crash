@@ -42,9 +42,13 @@
 //
 // Note: `opaque: false` is a proof of concept, NOT a production fix —
 // it causes the parent route to be painted behind the child (visual
-// overlap). The production workaround is a route-aware SelectionArea
+// overlap). The app-level workaround is a route-aware SelectionArea
 // toggle using `ModalRoute.isCurrent` + `SelectionContainer.disabled`
 // (see flutter/packages#11062 for the go_router variant).
+//
+// Framework fix (open): https://github.com/flutter/flutter/pull/184900 —
+// try/catch guard in both `_compareScreenOrder` overrides
+// (`selectable_region.dart` and `text.dart`).
 //
 // Verified on Flutter 3.41.6 stable + Chrome + dart2wasm (debug and
 // release).

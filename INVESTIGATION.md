@@ -1,16 +1,19 @@
 # SelectableRegion `_flushAdditions` crash — investigation summary
 
-## Status (2026-04-10, updated with framework fix research)
+## Status (2026-04-11, framework PR open)
 
 **Reliably reproduced.** Three approaches (A, B, C) crash on Flutter 3.41.6
 stable with dart2wasm on Chrome. Each hits a different code path inside
-`MultiSelectableSelectionContainerDelegate._compareScreenOrder`.
+`MultiSelectableSelectionContainerDelegate._compareScreenOrder` or
+`_SelectableTextContainerDelegate._compareScreenOrder`.
 
-**Framework fix direction confirmed:** a surgical try/catch guard in
-`_compareScreenOrder` is the viable upstreamable fix. The route-level
-`SelectionContainer.disabled` approach (originally endorsed by
-@Renzo-Olivares) was invalidated by deep review — see "Why not
-route-level `SelectionContainer.disabled`" below.
+**Framework PR open:** [flutter/flutter#184900](https://github.com/flutter/flutter/pull/184900)
+guards both `_compareScreenOrder` overrides (`selectable_region.dart` and
+`text.dart`) with a try/catch for `StateError` / `AssertionError` thrown from
+unlaid-out `RenderBox`es. The route-level `SelectionContainer.disabled`
+approach (originally endorsed by @Renzo-Olivares on the go_router PR) was
+invalidated by deep review — see "Why NOT route-level `SelectionContainer.disabled`"
+below. Awaiting review from @Renzo-Olivares.
 
 ## Root cause
 
@@ -30,9 +33,6 @@ laid out`.
 3. `_compareScreenOrder` → `getTransformTo` → `RenderFractionalTranslation.applyPaintTransform` → `size` (Approach C)
 
 ### Crash timing
-
-The crash mechanism validated by three independent research reports
-(see `investigation/report{1,2,3}.md`):
 
 1. When a new route is pushed, `_routeSetState` calls `setState` synchronously,
    marking `_ModalScopeState` dirty.
@@ -105,22 +105,24 @@ menus) where the route is visible and the user expects selection to work.
 The crash only occurs behind **opaque** routes where `_RenderTheater`
 actually skips layout. All three reports flagged this as HIGH risk.
 
-## Proposed framework fix: guard in `_compareScreenOrder`
+## Framework fix: guard in `_compareScreenOrder`
 
-The viable upstreamable fix is a surgical try/catch in
-`MultiSelectableSelectionContainerDelegate._compareScreenOrder`
-(`selectable_region.dart:~2565`):
+Shipped in [flutter/flutter#184900](https://github.com/flutter/flutter/pull/184900)
+(open). The fix is a surgical try/catch in **both** `_compareScreenOrder`
+overrides:
+
+**1. `selectable_region.dart:2565`** — `MultiSelectableSelectionContainerDelegate._compareScreenOrder`:
 
 ```dart
 static int _compareScreenOrder(Selectable a, Selectable b) {
   try {
-    final Rect rectA = MatrixUtils.transformRect(
-        a.getTransformTo(null), _getBoundingBox(a));
-    final Rect rectB = MatrixUtils.transformRect(
-        b.getTransformTo(null), _getBoundingBox(b));
-    final int result = rectA.top.compareTo(rectB.top);
-    if (result != 0) return result;
-    return rectA.left.compareTo(rectB.left);
+    final Rect rectA = MatrixUtils.transformRect(a.getTransformTo(null), _getBoundingBox(a));
+    final Rect rectB = MatrixUtils.transformRect(b.getTransformTo(null), _getBoundingBox(b));
+    final int result = _compareVertically(rectA, rectB);
+    if (result != 0) {
+      return result;
+    }
+    return _compareHorizontally(rectA, rectB);
   } on StateError {
     // Release mode: RenderBox.size throws StateError when _size is null.
     return 0;
@@ -131,13 +133,20 @@ static int _compareScreenOrder(Selectable a, Selectable b) {
 }
 ```
 
+**2. `text.dart:1304`** — `_SelectableTextContainerDelegate._compareScreenOrder`
+has the same try/catch shape, with `a.boundingBoxes.first` / `b.boundingBoxes.first`
+as the sort key instead of `_getBoundingBox(a)` / `_getBoundingBox(b)`.
+
 ### Why this works
 
-- Catches the crash at its exact throw site
+- Catches the crash at its exact throw site in both delegate paths
 - `_flushAdditions` calls `compareOrder` (→ `_compareScreenOrder`) in exactly
   two places: line 2463 (sort) and line 2474 (merge). Both covered.
 - Zero behavioral regressions (no dialog/bottom-sheet breakage)
 - Works regardless of how selection is structured in the route subtree
+- Covered by **two widget-level regression guards** plus **four mock-based
+  red/green tests** (one `StateError` + one `AssertionError` case per
+  guarded method) that fail on `master` without the guards and pass with them
 
 ### Known limitations
 
@@ -174,14 +183,13 @@ the framework doesn't know which routes have `SelectionArea`.
 ## Upstream
 
 - Canonical issue: [flutter/flutter#151536](https://github.com/flutter/flutter/issues/151536) (open, P2, 14+)
-- Our go_router PR: [flutter/packages#11062](https://github.com/flutter/packages/pull/11062) (open, reviewed by @Renzo-Olivares 2026-03-05 — directed framework fix)
-- Upstream comment: [#151536 comment](https://github.com/flutter/flutter/issues/151536#issuecomment-4225683042) (repro + analysis + fix direction)
-- Prior art: [PR #157996](https://github.com/flutter/flutter/pull/157996) (Gustl22), [PR #158918](https://github.com/flutter/flutter/pull/158918) (Gustl22)
+- **Framework PR: [flutter/flutter#184900](https://github.com/flutter/flutter/pull/184900)** — try/catch guard in both `_compareScreenOrder` overrides (open, awaiting review from @Renzo-Olivares)
+- `go_router` PR (app-level workaround): [flutter/packages#11062](https://github.com/flutter/packages/pull/11062) (open, reviewed by @Renzo-Olivares on 2026-03-05 — originally directed framework fix toward the `SelectionContainer.disabled` approach that was later invalidated)
+- Upstream analysis comment: [#151536 comment 4225683042](https://github.com/flutter/flutter/issues/151536#issuecomment-4225683042) — repro + mechanism + initial fix direction (later revised)
+- Upstream follow-up: [#151536 comment 4227118235](https://github.com/flutter/flutter/issues/151536#issuecomment-4227118235) — retracts the initial direction and points at the open framework PR
+- Prior art: [PR #157996](https://github.com/flutter/flutter/pull/157996) (Gustl22, self-closed incomplete draft), [PR #158918](https://github.com/flutter/flutter/pull/158918) (Gustl22, diagnostic draft)
 - Active maintainer: @Renzo-Olivares
-- No in-flight competitor PR as of 2026-04-10
-
-See [`investigation/upstream_research.md`](investigation/upstream_research.md)
-for the full upstream dossier.
+- No in-flight competitor PR as of 2026-04-11
 
 ## Historical context
 
@@ -199,17 +207,30 @@ C in `lib/main.dart`). Non-crashing approaches removed.
 
 ### April 2026 — framework fix research
 
-Four independent research reports (`investigation/report{1,2,3}.md` +
-adversarial review) validated the crash mechanism and invalidated the
-route-level `SelectionContainer.disabled` approach. Converged on the
-`_compareScreenOrder` try/catch guard as the viable upstreamable fix.
+Deep review of the route-level `SelectionContainer.disabled` approach
+found it fundamentally flawed: `SelectionArea` / `SelectableRegion`
+install their own `SelectionContainer(registrar: this, ...)` inside the
+route (`selectable_region.dart:1944`) that shadows any outer disabled
+scope. The research converged on the `_compareScreenOrder` try/catch
+guard as the viable upstreamable fix — see "Why NOT route-level
+`SelectionContainer.disabled`" above.
+
+### April 2026 — framework PR submitted
+
+[flutter/flutter#184900](https://github.com/flutter/flutter/pull/184900)
+opened on 2026-04-10 with the try/catch guard implementation. Both
+`_compareScreenOrder` overrides are guarded (`selectable_region.dart:2565` in
+`MultiSelectableSelectionContainerDelegate`, `text.dart:1304` in
+`_SelectableTextContainerDelegate`). Six tests land with it: two widget-level
+regression guards (one per file) plus four mock-based red/green tests (one
+`StateError` + one `AssertionError` case per guarded method) that directly
+exercise the catch branches via throwing `Selectable` mocks. `flutter analyze --flutter-repo`
+clean, all affected suites green locally, both commits GPG-signed. Awaiting
+review from @Renzo-Olivares. A follow-up comment on #151536
+([comment 4227118235](https://github.com/flutter/flutter/issues/151536#issuecomment-4227118235))
+retracts the original `_ModalScopeState.build()` proposal and points at the
+actual PR.
 
 ## Detailed analysis
 
-- [`investigation/2026-04-10_verification.md`](investigation/2026-04-10_verification.md) — crash verdicts, stack traces, `opaque: false` validation
-- [`investigation/upstream_research.md`](investigation/upstream_research.md) — issue/PR state, competitor sweep, Renzo's review directive
-- [`investigation/framework_line_numbers.md`](investigation/framework_line_numbers.md) — verified line numbers on Flutter master (zero drift from 3.41.6)
-- [`investigation/framework_fix_validation_prompt.md`](investigation/framework_fix_validation_prompt.md) — the deep research prompt used to validate assumptions
-- [`investigation/report1.md`](investigation/report1.md) — research report 1
-- [`investigation/report2.md`](investigation/report2.md) — research report 2
-- [`investigation/report3.md`](investigation/report3.md) — research report 3
+- [`investigation/2026-04-10_verification.md`](investigation/2026-04-10_verification.md) — stack traces for approaches A, B, C and the `opaque: false` isolation test

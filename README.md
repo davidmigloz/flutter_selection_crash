@@ -23,8 +23,10 @@ Minimal reproduction for [flutter/flutter#151536](https://github.com/flutter/flu
   the top Page in `opaque: false` prevents `_RenderTheater` from skipping
   the parent's layout, proving the mechanism. **Not production-ready** for
   full-screen routes (causes visual overlap).
-- **Framework fix:** try/catch guard in `_compareScreenOrder` — catches the
-  crash at its exact throw site with zero behavioral regressions. Route-level
+- **Framework fix:** [flutter/flutter#184900](https://github.com/flutter/flutter/pull/184900)
+  (open) — try/catch guard in both `_compareScreenOrder` overrides
+  (`selectable_region.dart` and `text.dart`), catching the crash at its exact
+  throw site with zero behavioral regressions. Route-level
   `SelectionContainer.disabled` wrappers were invalidated (nested
   `SelectionArea` creates its own registrar that shadows the disabled scope).
 
@@ -73,32 +75,37 @@ any outer disabled scope — see [INVESTIGATION.md](INVESTIGATION.md) for the
 detailed analysis of why route-level `SelectionContainer.disabled` wrappers
 don't work.
 
-## Proposed framework fix
+## Framework fix (PR open)
 
-Guard `_compareScreenOrder` with a try/catch for `StateError`/`AssertionError`
-when accessing geometry on unlaid-out `RenderBox`es. This is the minimal
-surgical fix at the exact crash site, with zero behavioral regressions.
+[flutter/flutter#184900](https://github.com/flutter/flutter/pull/184900)
+— guards both `_compareScreenOrder` overrides (`selectable_region.dart`
+and `text.dart`) with a try/catch for `StateError`/`AssertionError` when
+accessing geometry on unlaid-out `RenderBox`es. Minimal, surgical, zero
+behavioral regressions. Covered by two widget-level regression guards plus
+four mock-based red/green tests (one `StateError` + one `AssertionError`
+case per guarded method).
 
-See [INVESTIGATION.md](INVESTIGATION.md) for the full proposal and known
-limitations.
+See [INVESTIGATION.md](INVESTIGATION.md) for the full proposal, why route-level
+`SelectionContainer.disabled` wrappers don't work at the framework level, and
+known limitations (dead zones in #182573 unchanged).
 
 ## Documentation
 
-- [`INVESTIGATION.md`](INVESTIGATION.md) — full investigation summary, fix proposals, and why route-level wrappers don't work.
-- [`investigation/2026-04-10_verification.md`](investigation/2026-04-10_verification.md) — crash verdicts, stack traces, `opaque: false` validation.
-- [`investigation/upstream_research.md`](investigation/upstream_research.md) — current state of #151536 and related issues.
-- [`investigation/framework_line_numbers.md`](investigation/framework_line_numbers.md) — verified Flutter master line numbers.
-- [`investigation/report1.md`](investigation/report1.md), [`report2.md`](investigation/report2.md), [`report3.md`](investigation/report3.md) — independent research reports validating fix assumptions.
+- [`INVESTIGATION.md`](INVESTIGATION.md) — full investigation summary, the framework fix, and why route-level `SelectionContainer.disabled` wrappers don't work.
+- [`investigation/2026-04-10_verification.md`](investigation/2026-04-10_verification.md) — stack traces for all three approaches and the `opaque: false` isolation test.
 
-## Related issues
+## Related issues and PRs
 
-- [flutter/flutter#151536](https://github.com/flutter/flutter/issues/151536) — canonical, open
-- [flutter/packages#11062](https://github.com/flutter/packages/pull/11062) — our go_router PR (open; @Renzo-Olivares directed to move fix to framework)
-- [flutter/flutter#117527](https://github.com/flutter/flutter/issues/117527) — related, recently resolved
-- [flutter/flutter#119776](https://github.com/flutter/flutter/issues/119776) — related, resolved
-- [flutter/flutter#182573](https://github.com/flutter/flutter/issues/182573) — sibling (dead-zone variant)
-- [PR #157996](https://github.com/flutter/flutter/pull/157996) — Gustl22's incomplete draft
-- [PR #158918](https://github.com/flutter/flutter/pull/158918) — Gustl22's diagnostic draft
+- [flutter/flutter#151536](https://github.com/flutter/flutter/issues/151536) — canonical issue, open
+- [flutter/flutter#184900](https://github.com/flutter/flutter/pull/184900) — **framework fix PR (open)**: try/catch guard in both `_compareScreenOrder` overrides
+- [flutter/flutter#151536 (comment 4225683042)](https://github.com/flutter/flutter/issues/151536#issuecomment-4225683042) — upstream analysis comment: repro + mechanism + initial fix direction (later revised)
+- [flutter/flutter#151536 (comment 4227118235)](https://github.com/flutter/flutter/issues/151536#issuecomment-4227118235) — upstream follow-up: pivot from `_ModalScopeState` wrapper to `_compareScreenOrder` guard, links the framework PR
+- [flutter/packages#11062](https://github.com/flutter/packages/pull/11062) — `go_router` PR (open): app-level route-aware `SelectionArea` toggle; reviewed by @Renzo-Olivares
+- [flutter/flutter#182573](https://github.com/flutter/flutter/issues/182573) — sibling dead-zone variant (not fixed by the framework PR)
+- [flutter/flutter#117527](https://github.com/flutter/flutter/issues/117527) — related, recently resolved (different code path)
+- [flutter/flutter#119776](https://github.com/flutter/flutter/issues/119776) — related, resolved (different code path)
+- [flutter/flutter#157996](https://github.com/flutter/flutter/pull/157996) — Gustl22's incomplete draft (prior art)
+- [flutter/flutter#158918](https://github.com/flutter/flutter/pull/158918) — Gustl22's diagnostic draft (prior art)
 
 ## Build matrix
 
