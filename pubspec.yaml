@@ -1,0 +1,21 @@
+name: flutter_selection_crash
+description: >
+  Reproduction: SelectionArea + CustomScrollView crashes in _flushAdditions —
+  RenderBox was not laid out (flutter/flutter#151536, flutter/flutter#117527)
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.7.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
