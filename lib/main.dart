@@ -388,12 +388,32 @@ class _DeepLinkNavigator extends StatefulWidget {
   State<_DeepLinkNavigator> createState() => _DeepLinkNavigatorState();
 }
 
+/// Isolation variant for the Approach H fix hypothesis
+/// (flutter/flutter#151536): a [Page] whose route is non-opaque, so the
+/// parent route underneath still participates in layout even while the
+/// child route is on top. This mirrors the BRXS topology where the bottom
+/// route owns the [SelectionArea] and the top route should not cause the
+/// `_RenderTheater` to skip laying out the bottom.
+class _NonOpaquePage extends Page<void> {
+  const _NonOpaquePage({required this.child});
+  final Widget child;
+
+  @override
+  Route<void> createRoute(BuildContext context) => PageRouteBuilder<void>(
+    settings: this,
+    opaque: false,
+    transitionDuration: Duration.zero,
+    reverseTransitionDuration: Duration.zero,
+    pageBuilder: (_, _, _) => child,
+  );
+}
+
 class _DeepLinkNavigatorState extends State<_DeepLinkNavigator> {
   @override
   Widget build(BuildContext context) {
     // Simulate deep-link: both routes exist from the start.
     // Route 0 has SelectionArea + CustomScrollView (offstage).
-    // Route 1 is on top (visible).
+    // Route 1 is on top (visible, non-opaque so Route 0 still lays out).
     return Navigator(
       pages: [
         MaterialPage(
@@ -432,7 +452,7 @@ class _DeepLinkNavigatorState extends State<_DeepLinkNavigator> {
             ),
           ),
         ),
-        MaterialPage(
+        _NonOpaquePage(
           child: Scaffold(
             appBar: AppBar(title: const Text('C: Child route (visible)')),
             body: Center(
